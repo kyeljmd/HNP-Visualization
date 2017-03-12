@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <script src="/js/d3.v4.min.js"></script>
+    <script src="/js/jquery-1.12.4.min.js"></script>
+    <link href="/css/bootstrap.min.css" rel="stylesheet"></link>
+    <link rel="stylesheet" href="/css/font-awesome.min.css">
+    <style>
+        body {
+            position: relative;
+            padding-top: 50px;
+            max-height: 215px;
+        }
+        
+        .bar {
+            fill: steelblue;
+        }
+        
+        .bar:hover {
+            fill: brown;
+        }
+        
+        .axis--x path {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <nav role="navigation" class="navbar navbar-default navbar-fixed-top">
+        <div class="container">
+            <!-- Brand and toggle get grouped for better mobile display -->
+            <div class="navbar-header">
+                <button type="button" data-target="#navbarCollapse" data-toggle="collapse" class="navbar-toggle">
+          <span class="sr-only">Toggle navigation</span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          </button>
+                <a href="#" class="navbar-brand"> Health Nutrition and Population</a>
+            </div>
+            <!-- Collection of nav links and other content for toggling -->
+            <div id="navbarCollapse" class="collapse navbar-collapse">
+                <ul class="nav navbar-nav">
+                    <li><a href="index.html">Overview</a></li>
+                    <li class="active"><a href="compare.html">Compare</a></li>
+                    <li><a href="growth.html">Growth</a></li>
+                </ul>
+                <ul class="nav navbar-nav navbar-right">
+                    <li>
+                        <select id="year" class="form-control navbar-btn" onchange="changeYear(this.value)" label="Code"></select>
+                    </li>
+                    <li>
+						<select id="code" class="form-control navbar-btn" onchange="changeCode(this.value)" label="Code"></select>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+        <div class="container-fluid">
+
+            <div class="row">
+                <div class="col-md-12">
+                    <h1 id="title" class="display-4"></h1>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6">
+                    <i id="spinner" class="fa fa-spinner fa-spin fa-3x fa-fw"></i>
+                    <svg width="800" height="500"></svg>
+                </div>
+                <div class="col-md-4 pull-right">
+                    <label>Choose country to Add</label>
+                    <select id="country-code" class="form-control navbar-btn" onchange="countryCodeAdd(this.value)" label="Code"></select>
+                    <label>Choose country to remove from the Diagram</label>
+                    <select id="country-code-remove" class="form-control navbar-btn" onchange="countryCodeRemove(this.value)" label="Code"></select>
+                </div>
+            </div>
+        </div>
+        <script>
+            var svg = d3.select("svg"),
+                margin = {
+                    top: 20,
+                    right: 20,
+                    bottom: 30,
+                    left: 40
+                },
+                width = +svg.attr("width") - margin.left - margin.right,
+                height = +svg.attr("height") - margin.top - margin.bottom;
+
+            var x = d3.scaleBand().rangeRound([0, width]).padding(0.1),
+                y = d3.scaleLinear().rangeRound([height, 0]);
+
+
+            //Default Values;
+            var selectedYear = "1992";
+			var queue = d3.queue();
+			var dataCSV = "/HNP_Data.csv";
+			var countryCSV = "/HNP_Country.csv";
+        
+			//Select options;
+            var seriesCodes = [];
+            var countryCodes = [];
+
+            //defaultValues
+            var yearStart = 1960;
+            var yearEnd = 2015;
+            var defaultIndCode = "SP.ADO.TFRT";
+            var countries = ["CEB", "EAR", "ARB", "JOR", "KAZ", "KEN"]
+
+            //Primary Data Storage instead of querying again.
+            var dataStore;
+			var countryStore;
+
+            //lookup tables
+            var indicatorLookup = {};
+			var countryLookup = {};
+
+            var i;
+            var years = [];
+            //Initialize years
+            for (i = yearStart; i <= yearEnd; i++) {
+                years.push(i);
+            }
+
+			queue
+			.defer(d3.csv,dataCSV)
+			.defer(d3.csv,countryCSV)
+			.await(function(error,dataValues,countryRecord){
+				if (error) throw error;
+
+				//Store there values in dataStore
+                dataStore = dataValues;
+				countryStore = countryRecord;
+                var data = [];
+
+				//Build the options
+				$.each(dataStore, function(key, d) {
+					var indCode = d["Indicator Code"];
+					var indName = d["Indicator Name"]
+
+					if (!(indCode in indicatorLookup)) {
+						indicatorLookup[indCode] = indName;
+					}
+					//Check if indCode already exists;
+					if (!(seriesCodes.indexOf(indCode) >= 0)) {
+						seriesCodes.push(indCode);
+					}
+				});
+				//Build series codes options
+				$.each(seriesCodes, function(key, value) {
+					$('#code')
+						.append($("<option selected></option>")
+							.attr("value", value).attr("selected", defaultIndCode == value)
+							.text(value));
+
+				});
+				$.each(countryStore, function(key, value) {
+					var entry ={};
+					var countryCode = value["Country Code"];
+					var countryName = value["Short Name"];
+					
+					if (!(countryCode in countryLookup)) {
+						countryLookup[countryCode] = countryName;
+					}
+					
+					$('#country-code')
+						.append($("<option></option>")
+							.attr("value", value["Country Code"])
+							.text(value["Short Name"]));
+				});
+				
+				
+                updateCountryDropDown();
+                $("#title").text(indicatorLookup[defaultIndCode]);
+                drawChart(updateData());
+			});
+			//Add to options
+            $.each(years, function(key, value) {
+               $('#year')
+                        .append($("<option selected></option>")
+                            .attr("value", value).attr("selected",value == selectedYear)
+                            .text(value));
+                
+            });
+            function drawChart(data) {
+
+                $("#spinner").show();
+                d3.select("svg").selectAll("*").remove();
+                x.domain(data.map(function(d) {
+                    return d.letter;
+                }));
+                y.domain([0, d3.max(data, function(d) {
+                    return d.frequency;
+                })]);
+
+                var g = svg.append("g")
+                    .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+                g.append("g")
+                    .attr("class", "axis axis--x")
+                    .attr("transform", "translate(0," + height + ")")
+                    .call(d3.axisBottom(x));
+
+                g.append("g")
+                    .attr("class", "axis axis--y")
+                    .call(d3.axisLeft(y).ticks(10))
+                    .append("text")
+                    .attr("transform", "rotate(-90)")
+                    .attr("y", 6)
+                    .attr("dy", "0.71em")
+                    .attr("text-anchor", "end")
+                    .text("Frequency");
+					
+					//Generate only 20 co
+					var color = d3.schemeCategory20c;
+					
+                g.selectAll(".bar")
+                    .data(data)
+                    .enter().append("rect")
+                    .attr("class", "bar")
+					.style("fill", function(d, i) {
+						console.log(i);
+						return color[i];
+					})
+                    .attr("x", function(d) {
+                        return x(d.letter);
+                    })
+                    .attr("y", function(d) {
+                        return y(d.frequency);
+                    })
+                    .attr("width", x.bandwidth())
+                    .attr("height", function(d) {
+                        return height - y(d.frequency);
+                    });
+
+
+                $("#spinner").hide();
+            }
+
+            function changeYear(value) {
+                selectedYear = value;
+                drawChart(updateData());
+            }
+
+            function changeCode(value) {
+                defaultIndCode = value;
+                $("#title").text(indicatorLookup[value]);
+                drawChart(updateData());
+            }
+
+            function countryCodeAdd(value) {
+                countries.push(value);
+                updateCountryDropDown();
+                var data = updateData();
+                drawChart(data);
+            }
+
+            function countryCodeRemove(value) {
+                var index = countries.indexOf(value);
+                countries.splice(index, 1);
+                updateCountryDropDown();
+                var data = updateData();
+                drawChart(data);
+            }
+
+
+            function updateCountryDropDown() {
+				console.log(countryLookup);
+                $('#country-code-remove').find('option').remove();
+                $.each(countries, function(key, value) {
+					var cCode = "'"+value+"'";
+					console.log(value);
+					console.log(countryLookup["CEB"]);
+                    $('#country-code-remove')
+                        .append($("<option></option>")
+                            .attr("value", cCode)
+                            .text(countryLookup[value]));
+                });
+            }
+
+            function updateData() {
+                var data = [];
+                $.each(dataStore, function(key, d) {
+                    var c1 = (d["Indicator Code"] == defaultIndCode);
+                    var c2 = (countries.indexOf(d["Country Code"]) >= 0);
+                    if (c1 && c2 && d[selectedYear]) {
+                        var entry = {};
+                        entry["letter"] = d["Country Code"];
+                        entry["frequency"] = d[selectedYear];
+                        data.push(entry);
+                    }
+                });
+                return data;
+            }
+        </script>
+        <body>
+</html>

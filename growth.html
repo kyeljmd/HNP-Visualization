@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <script src="/js/d3.v4.min.js"></script>
+    <script src="/js/jquery-1.12.4.min.js"></script>
+    <link href="/css/bootstrap.min.css" rel="stylesheet"></link>
+    <link rel="stylesheet" href="/css/font-awesome.min.css">
+    <style>
+        body {
+            position: relative;
+            padding-top: 50px;
+            max-height: 215px;
+        }
+        
+        .bar {
+            fill: steelblue;
+        }
+        
+        .bar:hover {
+            fill: brown;
+        }
+        
+        .axis--x path {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <nav role="navigation" class="navbar navbar-default navbar-fixed-top">
+        <div class="container">
+            <!-- Brand and toggle get grouped for better mobile display -->
+            <div class="navbar-header">
+                <button type="button" data-target="#navbarCollapse" data-toggle="collapse" class="navbar-toggle">
+                    <span class="sr-only">Toggle navigation</span>
+                    <span class="icon-bar"></span>
+                    <span class="icon-bar"></span>
+                    <span class="icon-bar"></span>
+                </button>
+                <a href="#" class="navbar-brand">Health Nutrition and Population</a>
+            </div>
+            <!-- Collection of nav links and other content for toggling -->
+            <div id="navbarCollapse" class="collapse navbar-collapse">
+                <ul class="nav navbar-nav">
+                    <li><a href="index.html">Overview</a>
+                    </li>
+                    <li><a href="compare.html">Compare</a>
+                    </li>
+                    <li class="active"><a href="line.html">Growth</a>
+                    </li>
+                </ul>
+                <ul class="nav navbar-nav navbar-right">
+                    <li>
+                        <select id="code" class="form-control navbar-btn" onchange="changeCode(this.value)" label="Code"></select>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+    <div class="container-fluid">
+
+        <div class="row">
+            <div class="col-md-12">
+                <h1 id="title" class="display-4"></h1>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-md-6">
+                <i id="spinner" class="fa fa-spinner fa-spin fa-3x fa-fw"></i>
+                <svg width="760" height="500"></svg>
+            </div>
+            <div class="col-md-4 pull-right">
+                <label>Choose Country</label>
+                <select id="country-code" class="form-control navbar-btn" onchange="changeCountryCode(this.value)" label="Code"></select>
+            </div>
+        </div>
+    </div>
+    <script>
+        var svg = d3.select("svg"),
+            margin = {
+                top: 20,
+                right: 20,
+                bottom: 30,
+                left: 50
+            },
+            width = +svg.attr("width") - margin.left - margin.right,
+            height = +svg.attr("height") - margin.top - margin.bottom,
+            g = svg.append("g").attr("transform", "translate(" + margin.left + "," + margin.top + ")").attr("id", "line-chart");;
+
+        var queue = d3.queue();
+        var loc = "/HNP_Data.csv";
+        var country = "/HNP_Country.csv";
+
+        var x = d3.scaleTime()
+            .rangeRound([0, width]);
+
+        var y = d3.scaleLinear()
+            .rangeRound([height, 0]);
+
+        var line = d3.line()
+            .x(function(d) {
+                return x(d.date);
+            })
+            .y(function(d) {
+                return y(d.close);
+            });
+
+        var dataCSV = "/HNP_Data.csv";
+        var countryCSV = "/HNP_Country.csv";
+
+        var seriesCodes = [];
+        var countryCodes = [];
+        var indicatorLookup = {}
+
+        var selectedCode = "SP.ADO.TFRT";
+        var selectedCountry = "ARB";
+
+        var dataStore;
+
+        queue
+		.defer(d3.csv, dataCSV)
+		.defer(d3.csv, countryCSV)
+		.await(function(error, dataValues, countryRecord) {
+            if (error) throw error;
+            dataStore = dataValues;
+
+            //Build the options
+            $.each(dataStore, function(key, d) {
+                var indCode = d["Indicator Code"];
+                var indName = d["Indicator Name"]
+
+                if (!(indCode in indicatorLookup)) {
+                    indicatorLookup[indCode] = indName;
+                }
+                //Check if indCode already exists;
+                if (!(seriesCodes.indexOf(indCode) >= 0)) {
+                    seriesCodes.push(indCode);
+                }
+            });
+
+            //Build series codes options
+            $.each(seriesCodes, function(key, value) {
+                $('#code')
+                    .append($("<option selected></option>")
+                        .attr("value", value).attr("selected", selectedCode == value)
+                        .text(value));
+
+            });
+            $.each(countryRecord, function(key, value) {
+                $('#country-code')
+                    .append($("<option></option>")
+                        .attr("value", value["Country Code"]).attr("selected", selectedCountry == value["Country Code"])
+                        .text(value["Short Name"]));
+            });
+            $("#title").text(indicatorLookup[selectedCode]);
+            drawChart(updateData());
+        });
+
+        function changeCode(value) {
+            selectedCode = value;
+            $("#title").text(indicatorLookup[value]);
+            drawChart(updateData());
+        }
+
+        function changeCountryCode(value) {
+            selectedCountry = value;
+            drawChart(updateData());
+        }
+
+        function updateData() {
+            var data = [];
+            $.each(dataStore, function(i, d) {
+                if (d["Country Code"] == selectedCountry && d["Indicator Code"] == selectedCode) {
+                    for (var key in d) {
+                        if (!isNaN(key) && key > 0 && d[key] != "") {
+                            var entry = {};
+                            entry.date = new Date(key, 0);
+                            entry.close = parseFloat(d[key]);
+                            data.push(entry);
+                        }
+                    }
+                }
+            });
+            return data;
+        }
+
+        function drawChart(data) {
+            $("#line-chart").empty();
+            $("#spinner").show();
+            x.domain(d3.extent(data, function(d) {
+                return d.date;
+            }));
+
+            y.domain(d3.extent(data, function(d) {
+                return d.close;
+            }));
+
+            g.append("g")
+                .attr("transform", "translate(0," + height + ")")
+                .call(d3.axisBottom(x))
+                .select(".domain")
+                .remove();
+
+            g.append("g")
+                .call(d3.axisLeft(y))
+                .append("text")
+                .attr("fill", "#000")
+                .attr("transform", "rotate(-90)")
+                .attr("y", 6)
+                .attr("dy", "0.71em")
+                .attr("text-anchor", "end")
+
+            g.append("path")
+                .datum(data)
+                .attr("fill", "none")
+                .attr("stroke", "steelblue")
+                .attr("stroke-linejoin", "round")
+                .attr("stroke-linecap", "round")
+                .attr("stroke-width", 1.5)
+                .attr("d", line);
+            $("#spinner").hide();
+        }
+    </script>
+
+    <body>
+
+</html>
